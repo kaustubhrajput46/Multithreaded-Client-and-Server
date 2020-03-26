@@ -29,8 +29,8 @@ However, if any command is appended with a “&” sign (e.g., get file1.txt &),
 
 To run the client server programs :
 	Compile the files using : javac <filnename>
-	Run the programs in different terminals 
-	server program : java myftpserver [Normal Port] [Terminate Port]
-	client program : java myftp [IP address of server system] [Normal Port] [Terminate Port]
+	Run the programs in different terminals.
+	server program terminal: java myftpserver [Normal Port] [Terminate Port]
+	client program terminal: java myftp [IP address of server system] [Normal Port] [Terminate Port]
 
 Note : use new terminal for every new client!
