@@ -5,7 +5,12 @@ import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+
 public class myftp {
+
+    //Add the files under operation over here
+    public static ArrayList<String> list = new ArrayList<String>();
 
     public static String host;
 
@@ -236,6 +241,23 @@ public class myftp {
                         continue;
                     }
 
+                    //check if the file is present in the list
+                    boolean inUse = myftp.list.contains(str[1]);
+
+                    //wait until file is ready to use
+                    while(inUse){
+                        try{
+                            Thread.sleep(100);
+                        } catch (InterruptedException e){
+                            System.out.println("InterruptedException occured");
+                        }
+                        if(myftp.list.contains(str[1]) == false)
+                            inUse = false;
+                    }
+
+                    //if file is not present in the list, add it till we need the file
+                    myftp.list.add(str[1]);
+
                     //send put informing put operation
                     nsendtoServer.println("Put2");
 
@@ -244,7 +266,7 @@ public class myftp {
                     System.out.println("Command Id :"+threadId);
 
                     //creating a new socket with the server for put communication
-                    Socket putSocket = new Socket(myftp.host, 1000);
+                    Socket putSocket = new Socket(myftp.host, 8000);
 
                     //create a new thread for the execution of put
                     //Paramter 1 : file name > str[1]
@@ -273,6 +295,23 @@ public class myftp {
                         continue;
                     }
 
+                    //check if the file is present in the list
+                    boolean inUse = myftp.list.contains(str[1]);
+
+                    //wait until file is ready to use
+                    while(inUse){
+                        try{
+                            Thread.sleep(100);
+                        } catch (InterruptedException e){
+                            System.out.println("InterruptedException occured");
+                        }
+                        if(myftp.list.contains(str[1]) == false)
+                            inUse = false;
+                    }
+
+                    //if file is not present in the list, add it till we need the file
+                    myftp.list.add(str[1]);
+
                     //size of the file in int
                     int arraylength = Integer.parseInt(status);
 
@@ -280,8 +319,8 @@ public class myftp {
                     long threadId = Long.parseLong(nreadServer.readLine());
                     System.out.println("Command Id :"+threadId);
 
-                    //creating a new socket with the server for put communication
-                    Socket getSocket = new Socket(myftp.host, 1000);
+                    //creating a new socket with the server for get communication
+                    Socket getSocket = new Socket(myftp.host, 8001);
 
                     //create a thread for execution of get
                     // Paramter 1 : file name > str[1]
@@ -297,9 +336,9 @@ public class myftp {
 
                 }
             } else
-                if(str.length != 1)
-                    //do this to keep the communication going!
-                    nsendtoServer.println(userInput);
+            if(str.length != 1)
+                //do this to keep the communication going!
+                nsendtoServer.println(userInput);
         }// end while
     }
 }
@@ -314,7 +353,7 @@ class PutImplement extends Thread{
     private Socket putSocket;
 
     //constructor to take inputs
-    public PutImplement(String filename, PrintWriter nsendtoServer, PrintWriter tsendtoServer, BufferedReader nreadServer, BufferedReader treadServer,Socket putSocket){
+    public PutImplement(String filename, PrintWriter nsendtoServer, PrintWriter tsendtoServer, BufferedReader nreadServer, BufferedReader treadServer, Socket putSocket){
         this.nsendtoServer = nsendtoServer;
         this.tsendtoServer = tsendtoServer;
         this.nreadServer = nreadServer;
@@ -333,7 +372,7 @@ class PutImplement extends Thread{
     }
     private void putImplementation() throws IOException {
 
-        PrintWriter putsendtoServer = new PrintWriter(putSocket.getOutputStream(), true);
+        PrintWriter putsendtoServer = new PrintWriter(this.putSocket.getOutputStream(), true);
 
         //read input from Normal server
         BufferedReader putreadServer = new BufferedReader(new InputStreamReader(this.putSocket.getInputStream()));
@@ -341,10 +380,13 @@ class PutImplement extends Thread{
         //send the file name to be put on server
         putsendtoServer.println(filename);
         File file = new File(filename);
-        char[] filechararray = new char[(int)file.length()];
+        char[] filechararray = new char[(int) file.length()];
 
         //send size of filechararray to server
         putsendtoServer.println(filechararray.length);
+
+        //send current thread ID to server
+        putsendtoServer.println(Thread.currentThread().getId());
 
         //fbr for reading file
         BufferedReader fbr = new BufferedReader(new FileReader(file));
@@ -352,8 +394,24 @@ class PutImplement extends Thread{
         //write file in filechararray
         fbr.read(filechararray, 0, filechararray.length);
 
-        //send content of filechararray to server
-        putsendtoServer.write(filechararray, 0, filechararray.length);
+//        //send content of filechararray to server
+//        putsendtoServer.write(filechararray, 0, filechararray.length);
+
+        //read 1000 bytes/characters in one iteration
+        int n = filechararray.length/1000;
+        int i;
+
+        //After every 1000 bytes/characters check if termination of the thread is requested
+        for ( i=1; i<=n; i++){
+//            putsendtoServer.write(filechararray, 0, filechararray.length);
+            putsendtoServer.write(filechararray, (i-1)*1000, 1000);
+            putsendtoServer.flush();
+        }
+        //send the last remaining bytes/characters (which in total are less than 1000)
+        putsendtoServer.write(filechararray, (i-1)*1000, filechararray.length - n*1000);
+
+
+
         putsendtoServer.println("over");
 
         //get the acknowledgement from server
@@ -361,6 +419,9 @@ class PutImplement extends Thread{
 
         //close the socket
         this.putSocket.close();
+
+        //remove file from the list
+        myftp.list.remove(filename);
     }
 }
 
@@ -375,7 +436,7 @@ class GetImplement extends Thread{
     private int arraylength;
 
     //constructor to take inputs
-    public GetImplement(String filename, PrintWriter nsendtoServer, PrintWriter tsendtoServer, BufferedReader nreadServer, BufferedReader treadServer,Socket getSocket, int arraylength){
+    public GetImplement(String filename, PrintWriter nsendtoServer, PrintWriter tsendtoServer, BufferedReader nreadServer, BufferedReader treadServer, Socket getSocket, int arraylength){
         this.nsendtoServer = nsendtoServer;
         this.tsendtoServer = tsendtoServer;
         this.nreadServer = nreadServer;
@@ -400,6 +461,8 @@ class GetImplement extends Thread{
         //read input from Normal server
         BufferedReader getreadServer = new BufferedReader(new InputStreamReader(this.getSocket.getInputStream()));
 
+        //send current thread ID to server
+        getsendtoServer.println(Thread.currentThread().getId());
 
         //name of the file to be copied from server
         File file = new File(System.getProperty("user.dir") + "/" + filename);
@@ -407,13 +470,33 @@ class GetImplement extends Thread{
         //create char array of length provided by server
         char[] filebytearray = new char[arraylength];
 
-        //read into the array
-        getreadServer.read(filebytearray, 0, arraylength);
+//        //read into the array
+//        getreadServer.read(filebytearray, 0, arraylength);
+        //read 1000 bytes/characters in one iteration
+        int n = arraylength/1000;
+        int i;
+        //After every 1000 bytes/characters check if termination of the thread is requested
+        for ( i=1; i<=n; i++){
+            getreadServer.read(filebytearray, (i-1)*1000, 1000);
+
+        }
+        getreadServer.read(filebytearray, (i-1)*1000, arraylength - n*1000);
+
+
+
         File fileToBeRead = new File(System.getProperty("user.dir") + "/" + filename);
+
+        //mark the end of transfer
+        try {
+            getreadServer.readLine().equals("over");
+        } catch (Exception e) {
+            return;
+        }
 
         //fbr to write into file and then close writer.
         BufferedWriter fbr = new BufferedWriter(new FileWriter(fileToBeRead));
         fbr.write(filebytearray, 0, arraylength);
+//        fbr.flush();//delete me
         fbr.close();
 
         //wait for input indicating end of file
@@ -424,5 +507,8 @@ class GetImplement extends Thread{
 
         //close the socket
         this.getSocket.close();
+
+        //remove file from the list
+        myftp.list.remove(filename);
     }
 }

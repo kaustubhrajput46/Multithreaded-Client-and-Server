@@ -13,12 +13,37 @@ public class myftpserver {
     // Vector to store active clients
     static Vector<HandleClient> ar = new Vector<>();
 
+    //Add the files under operation over here
+    public static ArrayList<String> fileList = new ArrayList<String>();
+
     //Variable to store all the commands to be terminated
     //check how to make this variable sychronized so that multiple thread cannot access it at the same time.
     //TODO
     public static List list = new ArrayList();
     // counter for clients
     static int i = 0;
+
+    //server socket for get
+    public static ServerSocket getserverSocket;
+    //server socket for put
+    public static ServerSocket putserverSocket;
+
+    //start sockets for put and get
+    public myftpserver(){
+        try {
+            //create a socket for get and wait for incoming get commands
+            this.getserverSocket = new ServerSocket(8001);
+
+            //create a socket for put and wait for incoming get commands
+            this.putserverSocket = new ServerSocket(8000);
+        } catch (IOException e){
+            e.printStackTrace();
+            System.out.println("IOException Occured");
+            System.exit(1);
+        }
+    }
+
+
 
     public static void main(String[] args) throws IOException {
 
@@ -32,9 +57,13 @@ public class myftpserver {
         //tport
         int tport = Integer.parseInt(args[1]);
 
+        //create object of the class and get sockets for get and put
+        myftpserver server = new myftpserver();
+
+
         //Once the myftpserver program is invoked, it should create two threads.
         //The first thread will create a socket on the first port number and wait for incoming clients.
-        Thread firstT = new NormalServer(new ServerSocket(nport));
+        Thread firstT = new NormalServer(new ServerSocket(nport), server.getserverSocket, server.putserverSocket);
         firstT.start();
 
         //The second thread will create a socket on the second port and wait for incoming terminate commands.
@@ -144,6 +173,9 @@ class HandleTerminateClient implements Runnable {
                 String response = putreadServer.readLine();
                 //reply to the client
                 tsendtoClient.println(response);
+
+                //Since work of the terminate socket is done! close it!
+                connectToNormalSocket.close();
                 continue;
             }
         }
@@ -154,9 +186,13 @@ class HandleTerminateClient implements Runnable {
 class NormalServer extends Thread {
     private Socket nclientSocket;
     private final ServerSocket nserverSocket;
+    private ServerSocket getserverSocket;
+    private ServerSocket putserverSocket;
 
-    public NormalServer(ServerSocket nserverSocket) throws IOException {
+    public NormalServer(ServerSocket nserverSocket, ServerSocket getserverSocket, ServerSocket putserverSocket) throws IOException {
         this.nserverSocket = nserverSocket;
+        this.getserverSocket = getserverSocket;
+        this.putserverSocket = putserverSocket;
     }
 
     @Override
@@ -177,14 +213,10 @@ class NormalServer extends Thread {
 
             //Client discovered on nport. Accept connection
             this.nclientSocket = this.nserverSocket.accept();
-            HandleClient handleClient = new HandleClient(this.nclientSocket, this.nserverSocket);
+            Runnable handleClient = new HandleClient(this.nclientSocket, this.nserverSocket, this.getserverSocket, this.putserverSocket);
 
             // Create a new Thread with this object.
             Thread t = new Thread(handleClient);
-
-            //adding the client to the vector
-            //currently program does not make use of this but its good to have in terms of future scope!
-            myftpserver.ar.add(handleClient);
             t.start();
         }
     }
@@ -194,9 +226,14 @@ class HandleClient implements Runnable{
     private Socket nclientSocket;
     private ServerSocket nserverSocket;
 
-    public HandleClient(Socket nclientSocket, ServerSocket nserverSocket){
+    private ServerSocket getserverSocket;
+    private ServerSocket putserverSocket;
+
+    public HandleClient(Socket nclientSocket, ServerSocket nserverSocket, ServerSocket getserverSocket, ServerSocket putserverSocket){
         this.nclientSocket = nclientSocket;
         this.nserverSocket = nserverSocket;
+        this.getserverSocket = getserverSocket;
+        this.putserverSocket = putserverSocket;
     }
 
     @Override
@@ -385,13 +422,30 @@ class HandleClient implements Runnable{
                     continue;
                 }
 
+                //check if the file is present in the list
+                boolean inUse = myftpserver.fileList.contains(dir);
+
+                //wait until file is ready to use
+                while(inUse){
+                    try{
+                        Thread.sleep(100);
+                    } catch (InterruptedException e){
+                        System.out.println("InterruptedException occured");
+                    }
+                    if(myftpserver.fileList.contains(dir) == false)
+                        inUse = false;
+                }
+
+                //if file is not present in the list, add it till we need the file
+                myftpserver.fileList.add(dir);
+
                 File file = new File(dir);
                 char[] filechararray = new char[(int) file.length()];
 
                 //send the length of the char array
                 nsendtoClient.println(filechararray.length);
 
-                HandleClient handleClientGet = new HandleClient(nclientSocket, nserverSocket);
+                Runnable handleClientGet = new HandleClient(nclientSocket, nserverSocket, getserverSocket, putserverSocket);
 
                 //create a new thread for asynchronous execution
                 Thread getthread = new Get(handleClientGet, nclientInput, nsendtoClient, file, filechararray);
@@ -422,6 +476,7 @@ class HandleClient implements Runnable{
                 //fbr to write into file and then close writer.
                 BufferedWriter fbr = new BufferedWriter(new FileWriter(file));
                 fbr.write(filebytearray, 0, arraylength);
+//                fbr.flush();//newly added
                 fbr.close();
 
                 //wait for input indicating end of file
@@ -433,8 +488,7 @@ class HandleClient implements Runnable{
 
             //put implementation with & appended
             if(inputClient.equals("Put2")){
-                HandleClient handleClient = new HandleClient(nclientSocket, nserverSocket);
-
+                Runnable handleClient = new HandleClient(nclientSocket, nserverSocket, getserverSocket, putserverSocket);
                 //create a new thread for asynchronous execution
                 Thread putthread = new Put(handleClient, nclientInput, nsendtoClient);
                 putthread.start();
@@ -507,13 +561,10 @@ class HandleClient implements Runnable{
         }
     }
     //get implementation
-    public static synchronized void getImplement(BufferedReader nclientInput, PrintWriter nsendtoClient, File file, char[] filechararray) throws IOException {
-
-        //creating another socket for put command communication
-        ServerSocket getserverSocket = new ServerSocket(1000);
+    public  void getImplement(BufferedReader nclientInput, PrintWriter nsendtoClient, File file, char[] filechararray) throws IOException {
 
         //put command discovered. Accept connection
-        Socket getclientSocket = getserverSocket.accept();
+        Socket getclientSocket = this.getserverSocket.accept();
 
         PrintWriter getsendtoClient = new PrintWriter(getclientSocket.getOutputStream(), true);
         BufferedReader getclientInput = new BufferedReader(new InputStreamReader(getclientSocket.getInputStream()));
@@ -528,14 +579,33 @@ class HandleClient implements Runnable{
         int n = filechararray.length/1000;
         int i;
 
+        //receive thread id from client
+        long id = Long.parseLong(getclientInput.readLine());
+
         //After transferring, 1000 bytes/characters check if termination of the thread is requested
         for ( i=1; i<=n; i++){
             getsendtoClient.write(filechararray, (i-1)*1000, 1000);
+            getsendtoClient.flush();
             for (Object l: myftpserver.list) {
                 //check if the current thread is listed for termination.
-                if (l == (Object)Thread.currentThread().getId()){
-                    //Thread found! Terminating it!
-                    Thread.currentThread().interrupt();
+                if ((int) l == Thread.currentThread().getId()) {
+                    //Iterate over all threads to check if thread with the above id exists or not
+                    Set<Thread> setOfThread = Thread.getAllStackTraces().keySet();
+                    for (Thread thread : setOfThread) {
+                        if (thread.getId() == id) {
+                            //terminate the client thread!
+                            thread.interrupt();
+                            //close writer (which may indicate end of file)
+                            getsendtoClient.close();
+                        }
+                    }
+
+                    //remove file from the list
+                    myftpserver.fileList.remove(file.getName().toString());
+
+                    //close sockets
+                    getclientSocket.close();
+                    return;
                 }
             }
 
@@ -543,7 +613,7 @@ class HandleClient implements Runnable{
 
         //send the last remaining bytes/characters (which in total are less than 1000)
         getsendtoClient.write(filechararray, (i-1)*1000, filechararray.length - n*1000);
-
+//        getsendtoClient.flush();
         //send over indicating end of file
         getsendtoClient.println("over");
 
@@ -552,15 +622,15 @@ class HandleClient implements Runnable{
 
         //close the sockets
         getclientSocket.close();
-        getserverSocket.close();
+
+        //remove file from the list
+        myftpserver.fileList.remove(file.getName().toString());
     }
 
     //put implementation
-    public static synchronized void putImplement(BufferedReader nclientInput, PrintWriter nsendtoClient) throws IOException {
-        //creating another socket for put command communication
-        ServerSocket putserverSocket = new ServerSocket(1000);
+    public void putImplement(BufferedReader nclientInput, PrintWriter nsendtoClient) throws IOException {
         //put command discovered. Accept connection
-        Socket putclientSocket = putserverSocket.accept();
+        Socket putclientSocket = this.putserverSocket.accept();
 
         PrintWriter putsendtoClient = new PrintWriter(putclientSocket.getOutputStream(), true);
         BufferedReader putclientInput = new BufferedReader(new InputStreamReader(putclientSocket.getInputStream()));
@@ -568,8 +638,28 @@ class HandleClient implements Runnable{
         //name of the file to be copied to server
         String dir = putclientInput.readLine();
 
+        //check if the file is present in the list
+        boolean inUse = myftpserver.fileList.contains(dir);
+
+        //wait until file is ready to use
+        while(inUse){
+            try{
+                Thread.sleep(100);
+            } catch (InterruptedException e){
+                System.out.println("InterruptedException occured");
+            }
+            if(myftpserver.fileList.contains(dir) == false)
+                inUse = false;
+        }
+
+        //if file is not present in the list, add it till we need the file
+        myftpserver.fileList.add(dir);
+
         //size of the file in int
         int arraylength = Integer.parseInt(putclientInput.readLine());
+
+        //receive thread id from client
+        long id = Long.parseLong(putclientInput.readLine());
 
         //create char array of length provided by client
         char[] filebytearray = new char[arraylength];
@@ -581,11 +671,24 @@ class HandleClient implements Runnable{
         //After every 1000 bytes/characters check if termination of the thread is requested
         for ( i=1; i<=n; i++){
             putclientInput.read(filebytearray, (i-1)*1000, 1000);
-            for (Object l: myftpserver.list) {
+            for (Object l : myftpserver.list) {
                 //check if the current thread is listed for termination.
-                if (l == (Object)Thread.currentThread().getId()){
-                    //Thread found! Terminating it!
-                    Thread.currentThread().interrupt();
+                if ((int) l == Thread.currentThread().getId()) {
+                    //Iterate over all threads to check if thread with the above id exists or not
+                    Set<Thread> setOfThread = Thread.getAllStackTraces().keySet();
+                    for (Thread thread : setOfThread) {
+                        if (thread.getId() == id) {
+                            //terminate the client thread!
+                            thread.interrupt();
+                            //remove file from the list
+                            myftpserver.fileList.remove(dir);
+                            putsendtoClient.close();
+                        }
+                    }
+
+                    //close sockets
+                    putclientSocket.close();
+                    return;
                 }
             }
         }
@@ -594,6 +697,10 @@ class HandleClient implements Runnable{
         //shouldnt it be received over here?
         putclientInput.readLine().equals("over");
 
+//        //delete me
+//        for (char j: filebytearray) {
+//            System.out.print(j);
+//        }
         File file = new File(System.getProperty("user.dir") + "/" + dir);
 
         //fbr to write into file and then close writer.
@@ -606,7 +713,9 @@ class HandleClient implements Runnable{
 
         //close the sockets
         putclientSocket.close();
-        putserverSocket.close();
+
+        //remove file from the list
+        myftpserver.fileList.remove(dir);
     }
 }
 
@@ -615,8 +724,8 @@ class Put extends Thread{
     BufferedReader nclientInput;
     PrintWriter nsendtoClient;
     //constructor
-    Put(HandleClient handleClient, BufferedReader nclientInput, PrintWriter nsendtoClient){
-        this.handleClient = handleClient;
+    Put(Runnable handleClient, BufferedReader nclientInput, PrintWriter nsendtoClient){
+        this.handleClient = (HandleClient) handleClient;
         this.nclientInput = nclientInput;
         this.nsendtoClient = nsendtoClient;
     }
@@ -638,8 +747,8 @@ class Get extends Thread{
     char[] filechararray;
 
     //constructor
-    Get(HandleClient handleClient, BufferedReader nclientInput, PrintWriter nsendtoClient, File file, char[] filechararray){
-        this.handleClient = handleClient;
+    Get(Runnable handleClient, BufferedReader nclientInput, PrintWriter nsendtoClient, File file, char[] filechararray){
+        this.handleClient = (HandleClient) handleClient;
         this.nclientInput = nclientInput;
         this.nsendtoClient = nsendtoClient;
         this.file = file;
