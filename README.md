@@ -1,7 +1,7 @@
 # Multithreaded FTP Client and Server
 
 
-### In this project, multi-threaded client and server are introduced. The client is able to handle multiple commands  (from same user) simultaneously and server is able to handle multiple commands from multiple clients. The client executable is called “myftp” and the server executable is called “myftpserver”.
+## In this project, multi-threaded client and server are introduced. The client is able to handle multiple commands  (from same user) simultaneously and server is able to handle multiple commands from multiple clients. The client executable is called “myftp” and the server executable is called “myftpserver”.
 ### The client and server support below set of commands
 ###     -- get, put, delete, ls, cd, mkdir, pwd, quit, terminate.
 ### The syntax of the command is indicated in the parenthesis.
